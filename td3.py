@@ -4,6 +4,7 @@ import copy
 import time
 import random
 
+#8edb36bfbe278f21217c90fc63d4651f52fcfe26
 import pybullet_envs
 import gym
 import wandb
@@ -20,8 +21,19 @@ def eval_policy(policy, eval_env, eval_episodes=10):
     # A fixed seed is used for the eval environment
 
     # TODO: Implement the evaluation over eval_episodes and return the avg_reward
+    
+    
     avg_reward = 0.
 
+    for i in range(eval_episodes):
+        obs=eval_env.reset()
+        done=False
+        while not done:
+            action=policy.select_action(np.array(obs))
+            obs,reward,done,_=eval_env.step(action)
+            avg_reward+=reward
+    
+    avg_reward=avg_reward/eval_episodes
 
     return {'returns': avg_reward}
 
@@ -171,14 +183,32 @@ class TD3(object):
         # TODO: Update the critic network
         # Hint: You can use clamp() to clip values
         # Hint: Like before, pay attention to which variable should be detached.
+        # noise=action.data.normal_(0,self.policy_noise)
+        noise=torch.randn_like(action)*self.policy_noise
+        noise=noise.clamp(-self.noise_clip,self.noise_clip)
+        next_action=(self.actor_target(next_state) + noise ).clamp(-self.max_action,self.max_action)
+        
+        t_q1, t_q2= self.critic_target(next_state,next_action)
+        t_q=torch.min(t_q1,t_q2)
 
+        t_q=reward+(not_done*self.discount*t_q).detach()
 
+        c_q1,c_q2=self.critic(state,action)
+        critic_loss=F.mse_loss(c_q1,t_q)+F.mse_loss(c_q2,t_q)
+        #print("critic_loss",critic_loss)
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
 
         # Delayed policy updates
         if self.total_it % self.policy_freq == 0:
 
             # TODO: Update the policy network
-            
+            actor_loss=-self.critic(state,self.actor(state))[0].mean()  #???
+            #print("actor_loss",actor_loss)
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
 
             # Update the frozen target models, both actor and critic
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
@@ -188,7 +218,7 @@ class TD3(object):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
         return {"critic_loss": critic_loss.item(),
-                "critic": current_Q1.mean().item()}
+                "critic": c_q1.mean().item()}
 
     def save(self, filename):
         torch.save({'critic': self.critic.state_dict(),
@@ -204,6 +234,8 @@ class TD3(object):
         self.target_actor = copy.deepcopy(self.actor)
 
 if __name__ == "__main__":
+
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--algo_name', default='TD3')
     parser.add_argument('--env', default='HalfCheetahBulletEnv-v0') 
@@ -211,7 +243,7 @@ if __name__ == "__main__":
                         help='the learning rate of the optimizer')
     parser.add_argument('--max_timesteps', type=int, default=1000000,
                         help='total timesteps of the experiments')
-    parser.add_argument('--n_random_timesteps', type=int, default=10_000,
+    parser.add_argument('--n_random_timesteps', type=int, default=10000,
                         help='num of inital random data to pre-fill the replay buffer')
     parser.add_argument("--batch_size", default=256, type=int)
     parser.add_argument("--eval_freq", default=5000, type=int)
@@ -237,7 +269,7 @@ if __name__ == "__main__":
     if args.seed == 0:
         args.seed = int(time.time())
 
-    experiment_name = f"{args.env}_{args.algo_name}_{args.seed}_{int(time.time())}"
+    experiment_name = "{}_{}_{}_{}".format(args.env, args.algo_name,args.seed,int(time.time()))
     
     wandb.init(project="rl_project", config=vars(args), name=experiment_name)
 
@@ -310,10 +342,10 @@ if __name__ == "__main__":
         if t % args.eval_freq == 0:
             eval_info = eval_policy(td3, eval_env)
             eval_info.update({'timesteps': t})
-            print(f"Time steps: {t}, Eval_info: {eval_info}")
+            print("Time steps: {}, Eval_info: {}".format(t, eval_info))
             wandb.log({"eval/": eval_info}) 
 
     if args.save_model:
-        td3.save(f"./{experiment_name}")
+        td3.save("./{}".format(experiment_name))
 
     env.close()
