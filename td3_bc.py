@@ -98,14 +98,20 @@ class ReplayBuffer(object):
             torch.FloatTensor(self.not_done[ind]).to(device),
         )
 
-    def load_dataset(self,dataset):
-        self.state = dataset["states"]
-        self.action = dataset["actions"]
-        self.next_state = dataset["next_states"]
-        self.reward= dataset["rewards"].reshape(-1,1)
-        self.not_done = dataset["not_dones"].reshape(-1,1) #??
+    def load_dataset(self,dataset,ratio):
+        s=dataset["states"].shape[0]
+
+        nums = int(s*ratio)
+
+        self.state = dataset["states"][:nums]
+        self.action = dataset["actions"][:nums]
+        self.next_state = dataset["next_states"][:nums]
+        self.reward= dataset["rewards"][:nums].reshape(-1,1)
+        self.not_done = dataset["not_dones"][:nums].reshape(-1,1) #??
         # print(self.not_done[0:50])
         self.size=self.state.shape[0]
+        print("dataset size:",self.size)
+        
 
     def MeanStd(self,eps=1e-3):
         return self.state.mean(0,keepdims=True),self.state.std(0,keepdims=True)+eps
@@ -336,7 +342,11 @@ if __name__ == "__main__":
     # replay_buffer = fill_initial_buffer(env, replay_buffer, args.n_random_timesteps)
     
     data=pickle.load(open( "halfcheetah_mixed.pickle", "rb" ))
-    replay_buffer.load_dataset(data)
+    
+    # Size of dataset
+    ratio=0.5
+    
+    replay_buffer.load_dataset(data,ratio)
     mean,std=replay_buffer.MeanStd()
     replay_buffer.normalize() 
 
